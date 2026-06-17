@@ -1,0 +1,19 @@
+[zigbee]
+mqtt_host=192.168.69.5
+mqtt_username=eden
+mqtt_password=**************
+mqtt_topic=tele/TasmotaZigbee/TasmotaZigbee/SENSOR
+cmd_mqtt_topic=cmnd/TasmotaZigbee/TasmotaZigbee/ZbSend
+friendlynames=MikroTikZigbeePlug
+
+[tasmota]
+password=********************
+plugs=192.168.5.5,192.168.5.6,192.168.5.7,192.168.5.8,192.168.5.10,192.168.5.11,192.168.5.12,192.168.5.13,192.168.5.14,192.168.5.15
+
+[omada]
+baseurl = https://192.168.69.2:30077
+site = Home
+verify = False
+username = admin
+password = ************************
+profiles = PiKVM,Firestick,Cluster,Frigate,PhonesAndCameras
