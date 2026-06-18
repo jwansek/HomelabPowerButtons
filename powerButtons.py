@@ -29,6 +29,7 @@ class App(tk.Tk):
         super().__init__(*args, **kwargs)
         self.title("Power Buttons")
         self.protocol("WM_DELETE_WINDOW", self._on_closing)
+        self.iconbitmap(os.path.join(os.path.dirname(__file__), "Assets", "icon.ico"))
 
         self.config = configparser.ConfigParser()
         self.config.read(config_path)
@@ -40,8 +41,6 @@ class App(tk.Tk):
 
         self.mqttc.username_pw_set(self.config["zigbee"]["mqtt_username"], password = self.config["zigbee"]["mqtt_password"])
         self.mqttc.connect(self.config["zigbee"]["mqtt_host"], 1883, 60)
-
-        tk.Button(self, text = "sneed", command = lambda: print("sneed")).pack()
 
         self.img_green = tk.PhotoImage(file = os.path.join(os.path.dirname(__file__), "Assets", "green.png"))
         self.img_yellow = tk.PhotoImage(file = os.path.join(os.path.dirname(__file__), "Assets", "yellow.png"))
@@ -210,7 +209,16 @@ def send_raw_tasmota_http(host, password, command):
     return req.json()
 
 if __name__ == "__main__":
-    app = App(sys.argv[1])
-    app.mainloop()
+    places_to_look = [
+        os.path.dirname(__file__),
+        os.path.expanduser("~"),
+        os.getcwd()
+    ]
 
-    # print(tasmota_query_to_fields(query_tasmota_power("geoffery.plug", "securebackdoor")))
+    for p in places_to_look:
+        fp = os.path.join(p, "powerButtons.ini")
+        if os.path.exists(fp):
+            app = App(fp)
+            app.mainloop()
+    
+    print("Couldn't find a config file :c")
