@@ -1,0 +1,3 @@
+[submodule "omada-api"]
+	path = omada-api
+	url = git@github.com:thannerfabian/omada-api.git

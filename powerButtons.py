@@ -4,9 +4,13 @@ from tkinter import ttk
 import configparser
 import threading
 import requests
+import time
 import json
 import sys
 import os
+
+sys.path.insert(1, os.path.join(os.path.dirname(__file__), "omada-api"))
+from omada import Omada
 
 ZIGBEE_TRANSFORMATIONS = {
     "Power": "on",
@@ -20,19 +24,23 @@ TASMOTA_TRANSFORMATIONS = {
     "Power": "power",
     "Voltage": "voltage",
     "Current": "current",
-    "POWER": "on",
-    "Current": "current"
+    "POWER": "on"
 }
 
 class App(tk.Tk):
     def __init__(self, config_path, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.config_path = config_path
+
         self.title("Power Buttons")
         self.protocol("WM_DELETE_WINDOW", self._on_closing)
-        self.iconbitmap(os.path.join(os.path.dirname(__file__), "Assets", "icon.ico"))
+        # self.iconbitmap(os.path.join(os.path.dirname(__file__), "Assets", "icon.ico"))
 
         self.config = configparser.ConfigParser()
         self.config.read(config_path)
+
+        self.omada_client = Omada(config_path)
+        self.omada_client.login()
 
         self.mqttc = paho.Client("PowerButtonsBUI", clean_session = True)
 
@@ -73,6 +81,13 @@ class App(tk.Tk):
             self.device_types[friendlyname] = type_
             self.tasmota_ips[friendlyname] = ip
 
+        for profile in self.config["omada"]["profiles"].split(","):
+            self.devices[profile] = omada_query_to_fields(query_omada_profile(self.omada_client, profile))
+            type_ = "Omada HTTP"
+            self.device_widgets[profile] = DeviceButtonWidget(self, profile, type_)
+            self.device_widgets[profile].pack(fill = tk.BOTH, expand = True)
+            self.device_types[profile] = type_
+
         self.after(30 * 1000, self._after)
 
         self.mqtt_thread = threading.Thread(target = self._mqtt_thread_func)
@@ -85,6 +100,11 @@ class App(tk.Tk):
             friendlyname = list(self.tasmota_ips.keys())[list(self.tasmota_ips.values()).index(ip)]
             self.devices[friendlyname] = fields
             self.device_widgets[friendlyname].update()
+
+        for profile in self.config["omada"]["profiles"].split(","):
+            self.devices[profile] = omada_query_to_fields(query_omada_profile(self.omada_client, profile))
+            self.device_widgets[profile].update()
+            time.sleep(0.1)
 
         self.after(30 * 1000, self._after)        
 
@@ -109,7 +129,10 @@ class App(tk.Tk):
         self.mqttc.loop_forever()
     
     def _on_closing(self):
+        self.omada_client.logout()
+        print("Omada disconnected")
         self.mqttc.disconnect()
+        print("MQTT client disconnected")
         self.destroy()
 
 class DeviceButtonWidget(tk.Frame):
@@ -208,6 +231,15 @@ def send_raw_tasmota_http(host, password, command):
     })
     return req.json()
 
+def query_omada_profile(omada, profile_name):
+    profileId = omada.getProfileId(profile_name)
+    print(profile_name, profileId)
+    settings = omada.getProfileSettings(profileId)
+    return settings
+
+def omada_query_to_fields(profile_query_results):
+    return {"on": bool(profile_query_results["poe"]), "power": None, "current": None, "voltage": None}
+
 if __name__ == "__main__":
     places_to_look = [
         os.path.dirname(__file__),
@@ -218,7 +250,10 @@ if __name__ == "__main__":
     for p in places_to_look:
         fp = os.path.join(p, "powerButtons.ini")
         if os.path.exists(fp):
-            app = App(fp)
-            app.mainloop()
-    
+
+            root = App(fp)
+            root.mainloop()
+            
+            exit()
+
     print("Couldn't find a config file :c")
