@@ -27,10 +27,19 @@ TASMOTA_TRANSFORMATIONS = {
     "POWER": "on"
 }
 
+OMADA_MQTT_TRANSFORMATIONS = {
+    "tpPoePortStatus": "on",
+    "tpPoePower": "power",
+    "tpPoeCurrent": "current",
+    "tpPoeVoltage": "voltage"
+}
+
 class App(tk.Tk):
     def __init__(self, config_path, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.config_path = config_path
+
+        print("moshi moshi")
 
         self.title("Power Buttons")
         self.protocol("WM_DELETE_WINDOW", self._on_closing)
@@ -70,7 +79,12 @@ class App(tk.Tk):
             self.device_types[friendlyname] = type_
 
         for ip in self.config["tasmota"]["plugs"].split(","):
-            friendlyname = send_raw_tasmota_http(ip, self.config["tasmota"]["password"], "DeviceName")["DeviceName"]
+            try:
+                friendlyname = send_raw_tasmota_http(ip, self.config["tasmota"]["password"], "DeviceName")["DeviceName"]
+            except requests.exceptions.ConnectionError:
+                print("Couldnt find %s" % ip)
+                continue
+
             self.devices[friendlyname] = {
                 field: None
                 for field in TASMOTA_TRANSFORMATIONS.values()
@@ -82,7 +96,10 @@ class App(tk.Tk):
             self.tasmota_ips[friendlyname] = ip
 
         for profile in self.config["omada"]["profiles"].split(","):
-            self.devices[profile] = omada_query_to_fields(query_omada_profile(self.omada_client, profile))
+            self.devices[profile] = {
+                field: None
+                for field in OMADA_MQTT_TRANSFORMATIONS.values()
+            }
             type_ = "Omada HTTP"
             self.device_widgets[profile] = DeviceButtonWidget(self, profile, type_)
             self.device_widgets[profile].pack(fill = tk.BOTH, expand = True)
@@ -101,29 +118,31 @@ class App(tk.Tk):
             self.devices[friendlyname] = fields
             self.device_widgets[friendlyname].update()
 
-        for profile in self.config["omada"]["profiles"].split(","):
-            self.devices[profile] = omada_query_to_fields(query_omada_profile(self.omada_client, profile))
-            self.device_widgets[profile].update()
-            time.sleep(0.1)
-
         self.after(30 * 1000, self._after)        
 
     def _on_connect_cb(self, mqtt, userdata, flags, rc):
         print("Connected to broker")
-        self.mqttc.subscribe(self.config["zigbee"]["mqtt_topic"])
+        self.mqttc.subscribe(self.config["zigbee"]["tasmota_topic"])
+        self.mqttc.subscribe(self.config["zigbee"]["snmp_topic"])
 
     def _on_message_cb(self, mqtt, userdata, msg):
-        print('Topic: {0} | Message: {1}'.format(msg.topic, msg.payload))
+        print('Topic: {0} | Message: {1}'.format(msg.topic, msg.payload.decode()))
 
-        msg_j = json.loads(msg.payload.decode())
-        msg_j = msg_j["ZbReceived"][list(msg_j["ZbReceived"].keys())[0]]
-        if msg_j["Name"] in self.devices.keys():
-            for k, v in msg_j.items():
-                if k in ZIGBEE_TRANSFORMATIONS.keys():
-                    self.devices[msg_j["Name"]][ZIGBEE_TRANSFORMATIONS[k]] = v
-            
-            # print(self.devices)
-            self.device_widgets[msg_j["Name"]].update()
+        if "SwitchSNMP" in msg.topic:
+            # handle POE SNMP shit
+            msg_j = json.loads(msg.payload.decode())
+            msg_j = msg_j["ZbReceived"][list(msg_j["ZbReceived"].keys())[0]]
+        else:
+            # handle tasmota plug shit
+            msg_j = json.loads(msg.payload.decode())
+            msg_j = msg_j["ZbReceived"][list(msg_j["ZbReceived"].keys())[0]]
+            if msg_j["Name"] in self.devices.keys():
+                for k, v in msg_j.items():
+                    if k in ZIGBEE_TRANSFORMATIONS.keys():
+                        self.devices[msg_j["Name"]][ZIGBEE_TRANSFORMATIONS[k]] = v
+                
+                # print(self.devices)
+                self.device_widgets[msg_j["Name"]].update()
 
     def _mqtt_thread_func(self):
         self.mqttc.loop_forever()
@@ -230,15 +249,6 @@ def send_raw_tasmota_http(host, password, command):
         "password": password
     })
     return req.json()
-
-def query_omada_profile(omada, profile_name):
-    profileId = omada.getProfileId(profile_name)
-    print(profile_name, profileId)
-    settings = omada.getProfileSettings(profileId)
-    return settings
-
-def omada_query_to_fields(profile_query_results):
-    return {"on": bool(profile_query_results["poe"]), "power": None, "current": None, "voltage": None}
 
 if __name__ == "__main__":
     places_to_look = [

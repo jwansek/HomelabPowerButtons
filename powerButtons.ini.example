@@ -2,7 +2,8 @@
 mqtt_host=192.168.69.5
 mqtt_username=eden
 mqtt_password=**************
-mqtt_topic=tele/TasmotaZigbee/TasmotaZigbee/SENSOR
+tasmota_topic=tele/TasmotaZigbee/TasmotaZigbee/SENSOR
+snmp_topic=tele/SwitchSNMP/+/+/SENSOR
 cmd_mqtt_topic=cmnd/TasmotaZigbee/TasmotaZigbee/ZbSend
 friendlynames=MikroTikZigbeePlug
 
