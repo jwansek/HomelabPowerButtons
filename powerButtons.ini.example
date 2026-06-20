@@ -10,6 +10,7 @@ friendlynames=MikroTikZigbeePlug
 [tasmota]
 password=********************
 plugs=192.168.5.5,192.168.5.6,192.168.5.7,192.168.5.8,192.168.5.10,192.168.5.11,192.168.5.12,192.168.5.13,192.168.5.14,192.168.5.15
+disabled=NASPlug,SwitchPlug,ServerPlug
 
 [omada]
 baseurl = https://192.168.69.2:30077
@@ -17,4 +18,10 @@ site = Home
 verify = False
 username = admin
 password = ************************
-profiles = PiKVM,Firestick,Cluster,Frigate,PhonesAndCameras
+
+[omada_profile_ports]
+PiKVM = 192.168.69.28:8
+Firestick = 192.168.69.27:3
+Cluster = 192.168.69.28:17,192.168.69.28:18,192.168.69.28:19,192.168.69.28:20,192.168.69.28:21,192.168.69.28:22
+Frigate = 192.168.69.28:24
+PhonesAndCameras = 192.168.69.28:11,192.168.69.27:4

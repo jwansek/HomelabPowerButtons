@@ -2,7 +2,9 @@ import paho.mqtt.client as paho
 import tkinter as tk
 from tkinter import ttk
 import configparser
+import datetime
 import threading
+import platform
 import requests
 import time
 import json
@@ -35,6 +37,10 @@ OMADA_MQTT_TRANSFORMATIONS = {
 }
 
 class App(tk.Tk):
+
+    last_snmp_mqtt = None
+    last_zigbee_mqtt = None
+
     def __init__(self, config_path, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.config_path = config_path
@@ -43,9 +49,14 @@ class App(tk.Tk):
 
         self.title("Power Buttons")
         self.protocol("WM_DELETE_WINDOW", self._on_closing)
-        # self.iconbitmap(os.path.join(os.path.dirname(__file__), "Assets", "icon.ico"))
+        if platform.system() == "Windows":
+            self.iconbitmap(os.path.join(os.path.dirname(__file__), "Assets", "icon.ico"))
+        else:
+            self.img_icon = tk.PhotoImage(file = os.path.join(os.path.dirname(__file__), "Assets", "icon.png"))
+            self.iconphoto(False, self.img_icon)
 
-        self.config = configparser.ConfigParser()
+        self.config = configparser.RawConfigParser()
+        self.config.optionxform = str
         self.config.read(config_path)
 
         self.omada_client = Omada(config_path)
@@ -95,15 +106,24 @@ class App(tk.Tk):
             self.device_types[friendlyname] = type_
             self.tasmota_ips[friendlyname] = ip
 
-        for profile in self.config["omada"]["profiles"].split(","):
+        self.omada_ports = {}
+        self.omada_cache = {}
+        for profile in self.config["omada_profile_ports"].keys():
             self.devices[profile] = {
                 field: None
                 for field in OMADA_MQTT_TRANSFORMATIONS.values()
             }
-            type_ = "Omada HTTP"
+            type_ = "Omada SNMP"
             self.device_widgets[profile] = DeviceButtonWidget(self, profile, type_)
             self.device_widgets[profile].pack(fill = tk.BOTH, expand = True)
             self.device_types[profile] = type_
+            for v in self.config["omada_profile_ports"][profile].split(","):
+                self.omada_ports[tuple(v.split(":"))] = profile
+            self.omada_cache[profile] = {}
+
+        ttk.Separator(self, orient = tk.HORIZONTAL).pack(expand = True, fill = tk.BOTH)
+        self.bottom_widget = BottomWidget(self)
+        self.bottom_widget.pack(expand = True, fill = tk.BOTH)
 
         self.after(30 * 1000, self._after)
 
@@ -118,6 +138,26 @@ class App(tk.Tk):
             self.devices[friendlyname] = fields
             self.device_widgets[friendlyname].update()
 
+        for profile, ports in self.omada_cache.items():
+            self.devices[profile] = {
+                "power": sum([v["power"] for v in ports.values()]),
+                "current": sum([v["current"] for v in ports.values()]),
+                "voltage": None,
+                "num_on": 0,
+                "on": False
+            }
+            for on_device in [v["on"] for v in ports.values()]:
+                if on_device:
+                    self.devices[profile]["num_on"] += 1
+            if len(ports.values()) > 0:
+                self.devices[profile]["voltage"] = sum([v["voltage"] for v in ports.values()]) / len(ports.values())
+            if self.devices[profile]["num_on"] > 0:
+                self.devices[profile]["on"] = True
+            
+            # print(profile, self.devices[profile])
+            self.device_widgets[profile].update()
+
+        self.bottom_widget.update_in_sec = 30
         self.after(30 * 1000, self._after)        
 
     def _on_connect_cb(self, mqtt, userdata, flags, rc):
@@ -129,10 +169,19 @@ class App(tk.Tk):
         print('Topic: {0} | Message: {1}'.format(msg.topic, msg.payload.decode()))
 
         if "SwitchSNMP" in msg.topic:
+            self.last_snmp_mqtt = datetime.datetime.now()
             # handle POE SNMP shit
+            topic_s = msg.topic.split("/")
+            switch_host = topic_s[2]
+            switch_port = topic_s[3]
             msg_j = json.loads(msg.payload.decode())
-            msg_j = msg_j["ZbReceived"][list(msg_j["ZbReceived"].keys())[0]]
+
+            if (switch_host, switch_port) in self.omada_ports.keys():
+                profile = self.omada_ports[(switch_host, switch_port)]
+
+                self.omada_cache[profile][(switch_host, switch_port)] = switch_mqtt_to_fields(msg_j)
         else:
+            self.last_zigbee_mqtt = datetime.datetime.now()
             # handle tasmota plug shit
             msg_j = json.loads(msg.payload.decode())
             msg_j = msg_j["ZbReceived"][list(msg_j["ZbReceived"].keys())[0]]
@@ -154,6 +203,37 @@ class App(tk.Tk):
         print("MQTT client disconnected")
         self.destroy()
 
+class BottomWidget(tk.Frame):
+    
+    update_in_sec = 29
+
+    def __init__(self, parent:App):
+        tk.Frame.__init__(self, parent)
+        self.parent = parent
+
+        self.lbl_update_in = ttk.Label(self, text = "Refresh: 30s")
+        self.lbl_update_in.pack(side = tk.LEFT, padx = 5, pady = 5)
+
+        self.lbl_last_zigbee = ttk.Label(self, text = "Zigbee MQTT: Never")
+        self.lbl_last_zigbee.pack(side = tk.RIGHT, padx = 5, pady = 5)
+
+        self.lbl_last_snmp = ttk.Label(self, text = "SNMP MQTT: Never")
+        self.lbl_last_snmp.pack(side = tk.RIGHT, padx = 5, pady = 5)
+
+        self.after(1000, self._after)
+
+    def _after(self):
+        self.lbl_update_in.configure(text = "Refresh: %is" % self.update_in_sec)
+        self.update_in_sec -= 1
+
+        if self.parent.last_snmp_mqtt is not None:
+            self.lbl_last_snmp.configure(text = "SNMP MQTT: %is" % (datetime.datetime.now() - self.parent.last_snmp_mqtt).seconds)
+
+        if self.parent.last_zigbee_mqtt is not None:
+            self.lbl_last_zigbee.configure(text = "Zigbee MQTT: %is" % (datetime.datetime.now() - self.parent.last_zigbee_mqtt).seconds)
+
+        self.after(1000, self._after)
+
 class DeviceButtonWidget(tk.Frame):
     def __init__(self, parent:App, devicename, method):
         tk.Frame.__init__(self, parent)
@@ -161,7 +241,11 @@ class DeviceButtonWidget(tk.Frame):
         self.method = method
         self.parent = parent
         
-        self.btn_img = ttk.Label(self, image = self.parent.img_yellow)
+        if method == "Omada SNMP":
+            self.btn_img = ttk.Label(self, image = self.parent.img_yellow, text = "?", compound = tk.LEFT)
+        else:
+            self.btn_img = ttk.Label(self, image = self.parent.img_yellow)
+            
         self.btn_img.pack(side = tk.LEFT, padx = 5, pady = 5, fill = tk.BOTH, expand = True)
 
         self.lbl_name = tk.Label(self, text = devicename, font = "-weight bold")
@@ -179,6 +263,10 @@ class DeviceButtonWidget(tk.Frame):
         self.btn_on = ttk.Button(self, text = "On",  command = lambda: self.set_power("on"))
         self.btn_on.pack(side = tk.RIGHT, padx = 5, pady = 5, fill = tk.X, expand = True)
 
+        if self.devicename in self.parent.config["tasmota"]["disabled"].split(","):
+            self.btn_on.config(state = tk.DISABLED)
+            self.btn_off.config(state = tk.DISABLED)
+
     def set_power(self, set_to):
         if set_to == "on":
             payload = "1"
@@ -194,6 +282,13 @@ class DeviceButtonWidget(tk.Frame):
                 json.dumps({"device": self.devicename, "send": {"power": int(payload)}}),
                 qos = 1
             )
+        elif self.method == "Omada SNMP":
+            profileId = self.parent.omada_client.getProfileId(self.devicename)
+            settings = self.parent.omada_client.getProfileSettings(profileId)
+            settings['poe'] = payload
+            self.parent.omada_client.setProfileSettings(profileId, settings)
+
+            settings = self.parent.omada_client.getProfileSettings(profileId)
 
     def update_one_http(self):
         self.parent.devices[self.devicename] = tasmota_query_to_fields(query_tasmota_power(
@@ -222,6 +317,9 @@ class DeviceButtonWidget(tk.Frame):
             t += "%iV" % device_info["voltage"]
         else:
             t += "?V"
+
+        if "num_on" in device_info.keys():
+            self.btn_img.configure(text = str(device_info["num_on"]))
         
         self.lbl_details.configure(text = t)
 
@@ -241,6 +339,21 @@ def query_tasmota_power(host, password):
     )["StatusSNS"]["ENERGY"] | send_raw_tasmota_http(
         host, password, "Power"
     )
+
+def switch_mqtt_to_fields(mqtt_fields):
+    def transform_power(k, v):
+        if v == "enable(1)":
+            return True
+        if v == "disable(0)":
+            return False
+        
+        if k == "tpPoeCurrent":
+            return v / 1000
+        else:
+            return v
+
+
+    return {OMADA_MQTT_TRANSFORMATIONS[k]: transform_power(k, v) for k, v in mqtt_fields.items() if k in OMADA_MQTT_TRANSFORMATIONS.keys()}
 
 def send_raw_tasmota_http(host, password, command):
     req = requests.get("http://%s/cm" % host, params = {
