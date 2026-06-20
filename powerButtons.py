@@ -130,8 +130,16 @@ class App(tk.Tk):
 
     def _after(self):
         for ip in self.config["tasmota"]["plugs"].split(","):
-            data = query_tasmota_power(ip, self.config["tasmota"]["password"])
-            fields = tasmota_query_to_fields(data)
+            try:
+                data = query_tasmota_power(ip, self.config["tasmota"]["password"])
+            except requests.exceptions.ConnectionError:
+                print("Couldnt find %s" % ip)
+                fields = {
+                    field: None
+                    for field in TASMOTA_TRANSFORMATIONS.values()
+                }
+            else:
+                fields = tasmota_query_to_fields(data)
             friendlyname = list(self.tasmota_ips.keys())[list(self.tasmota_ips.values()).index(ip)]
             self.devices[friendlyname] = fields
             self.device_widgets[friendlyname].update()
@@ -372,7 +380,7 @@ def send_raw_tasmota_http(host, password, command):
         "cmnd": str(command),
         "user": "admin",
         "password": password
-    })
+    }, timeout = 5)
     return req.json()
 
 if __name__ == "__main__":
