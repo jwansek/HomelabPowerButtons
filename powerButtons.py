@@ -48,7 +48,7 @@ class App(tk.Tk):
 
         print("moshi moshi")
 
-        self.title("Power Buttons v3.0")
+        self.title("Power Buttons v3.1")
         self.protocol("WM_DELETE_WINDOW", self._on_closing)
         if platform.system() == "Windows":
             self.iconbitmap(os.path.join(os.path.dirname(__file__), "Assets", "icon.ico"))
@@ -137,6 +137,9 @@ class App(tk.Tk):
             self.device_widgets[friendlyname].update()
 
         for profile, ports in self.omada_cache.items():
+            if ports == {}:
+                continue
+
             self.devices[profile] = {
                 "power": sum([v["power"] for v in ports.values()]),
                 "current": sum([v["current"] for v in ports.values()]),
@@ -283,13 +286,17 @@ class DeviceButtonWidget(tk.Frame):
                 qos = 1
             )
         elif self.method == "Omada SNMP":
-            self.omada_client = Omada(self.parent.config_path)
-            self.omada_client.login()
-            profileId = self.omada_client.getProfileId(self.devicename)
-            settings = self.omada_client.getProfileSettings(profileId)
+            omada_client = Omada(self.parent.config_path)
+            omada_client.login()
+            profileId = omada_client.getProfileId(self.devicename)
+            settings = omada_client.getProfileSettings(profileId)
+            if settings is None:
+                msgbox.showerror("Error", "HTTP GET request to the API returned null. TODO: Fix this!")
+                return 
             settings['poe'] = payload
-            self.omada_client.setProfileSettings(profileId, settings)
-            self.omada_client.logout()
+            omada_client.setProfileSettings(profileId, settings)
+            omada_client.logout()
+            del omada_client
 
         msgbox.showinfo("Power Set", "Set '%s' device '%s' to '%s'" % (self.method, self.devicename, set_to))
 
@@ -303,10 +310,12 @@ class DeviceButtonWidget(tk.Frame):
         t = ""
         device_info = self.parent.devices[self.devicename]
 
-        if device_info["on"]:
+        if device_info["on"] is None:
+            self.btn_img.configure(image = self.parent.img_yellow)
+        elif device_info["on"]:
             self.btn_img.configure(image = self.parent.img_green)
         elif device_info["on"] == False:
-            self.btn_img.configure(image = self.parent.img_red)
+            self.btn_img.configure(image = self.parent.img_red)      
 
         if device_info["power"] is not None:
             t += "%iW " % device_info["power"]
