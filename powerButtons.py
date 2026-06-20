@@ -1,4 +1,5 @@
 import paho.mqtt.client as paho
+import tkinter.messagebox as msgbox
 import tkinter as tk
 from tkinter import ttk
 import configparser
@@ -47,7 +48,7 @@ class App(tk.Tk):
 
         print("moshi moshi")
 
-        self.title("Power Buttons")
+        self.title("Power Buttons v3.0")
         self.protocol("WM_DELETE_WINDOW", self._on_closing)
         if platform.system() == "Windows":
             self.iconbitmap(os.path.join(os.path.dirname(__file__), "Assets", "icon.ico"))
@@ -58,9 +59,6 @@ class App(tk.Tk):
         self.config = configparser.RawConfigParser()
         self.config.optionxform = str
         self.config.read(config_path)
-
-        self.omada_client = Omada(config_path)
-        self.omada_client.login()
 
         self.mqttc = paho.Client("PowerButtonsBUI", clean_session = True)
 
@@ -144,7 +142,7 @@ class App(tk.Tk):
                 "current": sum([v["current"] for v in ports.values()]),
                 "voltage": None,
                 "num_on": 0,
-                "on": False
+                "on": None
             }
             for on_device in [v["on"] for v in ports.values()]:
                 if on_device:
@@ -153,6 +151,8 @@ class App(tk.Tk):
                 self.devices[profile]["voltage"] = sum([v["voltage"] for v in ports.values()]) / len(ports.values())
             if self.devices[profile]["num_on"] > 0:
                 self.devices[profile]["on"] = True
+            else:
+                self.devices[profile]["on"] = False
             
             # print(profile, self.devices[profile])
             self.device_widgets[profile].update()
@@ -197,8 +197,8 @@ class App(tk.Tk):
         self.mqttc.loop_forever()
     
     def _on_closing(self):
-        self.omada_client.logout()
-        print("Omada disconnected")
+        # self.omada_client.logout()
+        # print("Omada disconnected")
         self.mqttc.disconnect()
         print("MQTT client disconnected")
         self.destroy()
@@ -283,12 +283,15 @@ class DeviceButtonWidget(tk.Frame):
                 qos = 1
             )
         elif self.method == "Omada SNMP":
-            profileId = self.parent.omada_client.getProfileId(self.devicename)
-            settings = self.parent.omada_client.getProfileSettings(profileId)
+            self.omada_client = Omada(self.parent.config_path)
+            self.omada_client.login()
+            profileId = self.omada_client.getProfileId(self.devicename)
+            settings = self.omada_client.getProfileSettings(profileId)
             settings['poe'] = payload
-            self.parent.omada_client.setProfileSettings(profileId, settings)
+            self.omada_client.setProfileSettings(profileId, settings)
+            self.omada_client.logout()
 
-            settings = self.parent.omada_client.getProfileSettings(profileId)
+        msgbox.showinfo("Power Set", "Set '%s' device '%s' to '%s'" % (self.method, self.devicename, set_to))
 
     def update_one_http(self):
         self.parent.devices[self.devicename] = tasmota_query_to_fields(query_tasmota_power(
@@ -376,7 +379,6 @@ if __name__ == "__main__":
 
             root = App(fp)
             root.mainloop()
-            
-            exit()
+            break
 
     print("Couldn't find a config file :c")

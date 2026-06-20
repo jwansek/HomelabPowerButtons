@@ -5,7 +5,7 @@ mqtt_password=**************
 tasmota_topic=tele/TasmotaZigbee/TasmotaZigbee/SENSOR
 snmp_topic=tele/SwitchSNMP/+/+/SENSOR
 cmd_mqtt_topic=cmnd/TasmotaZigbee/TasmotaZigbee/ZbSend
-friendlynames=MikroTikZigbeePlug
+friendlynames=MikroTikZigbeePlug,OnAirLight
 
 [tasmota]
 password=********************
