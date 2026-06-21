@@ -48,7 +48,7 @@ class App(tk.Tk):
 
         print("moshi moshi")
 
-        self.title("Power Buttons v3.1")
+        self.title("Power Buttons v3.2")
         self.protocol("WM_DELETE_WINDOW", self._on_closing)
         if platform.system() == "Windows":
             self.iconbitmap(os.path.join(os.path.dirname(__file__), "Assets", "icon.ico"))
