@@ -129,6 +129,9 @@ class App(tk.Tk):
         self.mqtt_thread.start()
 
     def _after(self):
+        self.bottom_widget.update_in_sec = 30
+        self.after(30 * 1000, self._after)  
+
         for ip in self.config["tasmota"]["plugs"].split(","):
             try:
                 data = query_tasmota_power(ip, self.config["tasmota"]["password"])
@@ -140,7 +143,11 @@ class App(tk.Tk):
                 }
             else:
                 fields = tasmota_query_to_fields(data)
-            friendlyname = list(self.tasmota_ips.keys())[list(self.tasmota_ips.values()).index(ip)]
+            try:
+                friendlyname = list(self.tasmota_ips.keys())[list(self.tasmota_ips.values()).index(ip)]
+            except ValueError:
+                print("Couldn't find %s :c" % ip)
+                continue
             self.devices[friendlyname] = fields
             self.device_widgets[friendlyname].update()
 
@@ -166,10 +173,7 @@ class App(tk.Tk):
                 self.devices[profile]["on"] = False
             
             # print(profile, self.devices[profile])
-            self.device_widgets[profile].update()
-
-        self.bottom_widget.update_in_sec = 30
-        self.after(30 * 1000, self._after)        
+            self.device_widgets[profile].update()      
 
     def _on_connect_cb(self, mqtt, userdata, flags, rc):
         print("Connected to broker")
@@ -371,7 +375,6 @@ def switch_mqtt_to_fields(mqtt_fields):
             return v / 1000
         else:
             return v
-
 
     return {OMADA_MQTT_TRANSFORMATIONS[k]: transform_power(k, v) for k, v in mqtt_fields.items() if k in OMADA_MQTT_TRANSFORMATIONS.keys()}
 
