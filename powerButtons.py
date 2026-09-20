@@ -2,6 +2,7 @@ import paho.mqtt.client as paho
 import tkinter.messagebox as msgbox
 import tkinter as tk
 from tkinter import ttk
+from tkinter import scrolledtext
 import configparser
 import datetime
 import threading
@@ -41,6 +42,7 @@ class App(tk.Tk):
 
     last_snmp_mqtt = None
     last_zigbee_mqtt = None
+    last_tasmota_mqtt = None
 
     def __init__(self, config_path, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -48,7 +50,7 @@ class App(tk.Tk):
 
         print("moshi moshi")
 
-        self.title("Power Buttons v3.3")
+        self.title("Power Buttons v4.0")
         self.protocol("WM_DELETE_WINDOW", self._on_closing)
         if platform.system() == "Windows":
             self.iconbitmap(os.path.join(os.path.dirname(__file__), "Assets", "icon.ico"))
@@ -120,73 +122,63 @@ class App(tk.Tk):
             self.omada_cache[profile] = {}
 
         ttk.Separator(self, orient = tk.HORIZONTAL).pack(expand = True, fill = tk.BOTH)
+        self.text = scrolledtext.ScrolledText(self, height=8)
+        self.text.configure(state = tk.DISABLED)
+        self.text.configure(
+            font = ("Consolas", 8), 
+            fg = "green", 
+            bg = "#282C34", 
+            insertbackground="white"
+        )
+        self.text.pack(expand = True, fill = tk.BOTH)
+        ttk.Separator(self, orient = tk.HORIZONTAL).pack(expand = True, fill = tk.BOTH)
         self.bottom_widget = BottomWidget(self)
         self.bottom_widget.pack(expand = True, fill = tk.BOTH)
-
-        self.after(30 * 1000, self._after)
+        self.resizable(False, False)
 
         self.mqtt_thread = threading.Thread(target = self._mqtt_thread_func)
         self.mqtt_thread.start()
 
-    def _after(self):
-        self.bottom_widget.update_in_sec = 30
-        self.after(30 * 1000, self._after)  
 
-        for ip in self.config["tasmota"]["plugs"].split(","):
-            try:
-                data = query_tasmota_power(ip, self.config["tasmota"]["password"])
-            except requests.exceptions.ConnectionError:
-                print("Couldnt find %s" % ip)
-                fields = {
-                    field: None
-                    for field in TASMOTA_TRANSFORMATIONS.values()
-                }
-            else:
-                fields = tasmota_query_to_fields(data)
-            try:
-                friendlyname = list(self.tasmota_ips.keys())[list(self.tasmota_ips.values()).index(ip)]
-            except ValueError:
-                print("Couldn't find %s :c" % ip)
-                continue
-            self.devices[friendlyname] = fields
-            self.device_widgets[friendlyname].update()
-
-        for profile, ports in self.omada_cache.items():
-            if ports == {}:
-                continue
-
-            self.devices[profile] = {
-                "power": sum([v["power"] for v in ports.values()]),
-                "current": sum([v["current"] for v in ports.values()]),
-                "voltage": None,
-                "num_on": 0,
-                "on": None
-            }
-            for on_device in [v["on"] for v in ports.values()]:
-                if on_device:
-                    self.devices[profile]["num_on"] += 1
-            if len(ports.values()) > 0:
-                self.devices[profile]["voltage"] = sum([v["voltage"] for v in ports.values()]) / len(ports.values())
-            if self.devices[profile]["num_on"] > 0:
-                self.devices[profile]["on"] = True
-            else:
-                self.devices[profile]["on"] = False
-            
-            # print(profile, self.devices[profile])
-            self.device_widgets[profile].update()      
+    def update_omada_entry(self, profile, ports):
+        self.devices[profile] = {
+            "power": sum([v["power"] for v in ports.values()]),
+            "current": sum([v["current"] for v in ports.values()]),
+            "voltage": None,
+            "num_on": 0,
+            "on": None
+        }
+        for on_device in [v["on"] for v in ports.values()]:
+            if on_device:
+                self.devices[profile]["num_on"] += 1
+        if len(ports.values()) > 0:
+            self.devices[profile]["voltage"] = sum([v["voltage"] for v in ports.values()]) / len(ports.values())
+        if self.devices[profile]["num_on"] > 0:
+            self.devices[profile]["on"] = True
+        else:
+            self.devices[profile]["on"] = False
+        
+        # print(profile, self.devices[profile])
+        self.device_widgets[profile].update()
 
     def _on_connect_cb(self, mqtt, userdata, flags, rc):
         print("Connected to broker")
         self.mqttc.subscribe(self.config["zigbee"]["tasmota_topic"])
         self.mqttc.subscribe(self.config["zigbee"]["snmp_topic"])
+        self.mqttc.subscribe(self.config["zigbee"]["tasmotaplug_topic"])
 
     def _on_message_cb(self, mqtt, userdata, msg):
         print('Topic: {0} | Message: {1}'.format(msg.topic, msg.payload.decode()))
+        topic_s = msg.topic.split("/")
 
-        if "SwitchSNMP" in msg.topic:
+        self.text.configure(state = tk.NORMAL)
+        self.text.insert(tk.END, "%s\t%s\n" % (msg.topic, msg.payload.decode()))
+        self.text.see(tk.END)
+        self.text.configure(state = tk.DISABLED)
+
+        if topic_s[1] == "SwitchSNMP":
             self.last_snmp_mqtt = datetime.datetime.now()
             # handle POE SNMP shit
-            topic_s = msg.topic.split("/")
             switch_host = topic_s[2]
             switch_port = topic_s[3]
             msg_j = json.loads(msg.payload.decode())
@@ -195,7 +187,11 @@ class App(tk.Tk):
                 profile = self.omada_ports[(switch_host, switch_port)]
 
                 self.omada_cache[profile][(switch_host, switch_port)] = switch_mqtt_to_fields(msg_j)
-        else:
+
+                # update too
+                self.update_omada_entry(profile, self.omada_cache[profile])
+
+        elif topic_s[1] == "TasmotaZigbee":
             self.last_zigbee_mqtt = datetime.datetime.now()
             # handle tasmota plug shit
             msg_j = json.loads(msg.payload.decode())
@@ -207,6 +203,15 @@ class App(tk.Tk):
                 
                 # print(self.devices)
                 self.device_widgets[msg_j["Name"]].update()
+
+        elif topic_s[1] == "TasmotaPlug":
+            self.last_tasmota_mqtt = datetime.datetime.now()
+            friendlyname = topic_s[2]
+            report = tasmota_query_to_fields(json.loads(msg.payload.decode())["ENERGY"] | send_raw_tasmota_http(
+                self.tasmota_ips[friendlyname], self.config["tasmota"]["password"], "Power"
+            ))
+            self.devices[friendlyname] = report
+            self.device_widgets[friendlyname].update()
 
     def _mqtt_thread_func(self):
         self.mqttc.loop_forever()
@@ -226,8 +231,8 @@ class BottomWidget(tk.Frame):
         tk.Frame.__init__(self, parent)
         self.parent = parent
 
-        self.lbl_update_in = ttk.Label(self, text = "Refresh: 30s")
-        self.lbl_update_in.pack(side = tk.LEFT, padx = 5, pady = 5)
+        self.lbl_last_tasmota = ttk.Label(self, text = "Tasmota MQTT: Never")
+        self.lbl_last_tasmota.pack(side = tk.RIGHT, padx = 5, pady = 5)
 
         self.lbl_last_zigbee = ttk.Label(self, text = "Zigbee MQTT: Never")
         self.lbl_last_zigbee.pack(side = tk.RIGHT, padx = 5, pady = 5)
@@ -238,8 +243,8 @@ class BottomWidget(tk.Frame):
         self.after(1000, self._after)
 
     def _after(self):
-        self.lbl_update_in.configure(text = "Refresh: %is" % self.update_in_sec)
-        self.update_in_sec -= 1
+        if self.parent.last_tasmota_mqtt is not None:
+            self.lbl_last_tasmota.configure(text = "Tasmota MQTT: %is" % (datetime.datetime.now() - self.parent.last_tasmota_mqtt).seconds)
 
         if self.parent.last_snmp_mqtt is not None:
             self.lbl_last_snmp.configure(text = "SNMP MQTT: %is" % (datetime.datetime.now() - self.parent.last_snmp_mqtt).seconds)
